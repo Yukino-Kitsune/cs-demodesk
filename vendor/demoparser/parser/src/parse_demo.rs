@@ -32,7 +32,6 @@ pub struct DemoOutput {
     pub chat_messages: Vec<ChatMessageRecord>,
     pub convars: AHashMap<String, String>,
     pub header: Option<AHashMap<String, String>>,
-    pub server_infos: Vec<csgoproto::CsvcMsgServerInfo>,
     pub player_md: Vec<PlayerEndMetaData>,
     /// Live player roster from CCSPlayerController entities (final per-player state,
     /// deduplicated by steamid). Populated even when the end-of-match scoreboard message
@@ -110,25 +109,25 @@ impl<'a> Parser<'a> {
         Parser::remove_item_sold_events(&mut outputs.game_events);
         Ok(outputs)
     }
-    fn remove_duplicate_player_connects(events: &mut Vec<GameEvent>) {
+    fn remove_duplicate_player_connects(events: &mut Vec<GameEvent>){
         let mut v = events.iter().filter(|x| x.name == "player_first_connect").collect_vec();
         v.sort_by_key(|x| x.tick);
         let mut ids = AHashMap::default();
-        for x in v {
-            for f in &x.fields {
-                if f.name == "steamid" {
-                    if let Some(Variant::U64(s)) = f.data {
+        for x in v{
+            for f in &x.fields{
+                if f.name == "steamid"{
+                    if let Some(Variant::U64(s)) = f.data{
                         match ids.get(&s) {
-                            Some(_) => {}
+                            Some(_) => {},
                             None => {
                                 ids.insert(s, x.clone());
                             }
                         }
                     }
+                    }
                 }
             }
-        }
-        events.retain(|x| x.name != "player_first_connect");
+        events.retain(|x|x.name != "player_first_connect");
         events.extend(ids.values().map(|x| x.clone()));
     }
     fn second_pass_single_threaded(&self, outer_bytes: &[u8], first_pass_output: FirstPassOutput) -> Result<DemoOutput, DemoParserError> {
@@ -136,41 +135,30 @@ impl<'a> Parser<'a> {
         let mut t = std::time::Instant::now();
         let mut parser = SecondPassParser::new(first_pass_output.clone(), 16, true, None)?;
         parser.start(outer_bytes)?;
-        if prof {
-            eprintln!("[prof] second_pass start(): {:.3}s", t.elapsed().as_secs_f64());
-            t = std::time::Instant::now();
-        }
+        if prof { eprintln!("[prof] second_pass start(): {:.3}s", t.elapsed().as_secs_f64()); t = std::time::Instant::now(); }
         let second_pass_output = parser.create_output();
-        if prof {
-            eprintln!("[prof] create_output: {:.3}s", t.elapsed().as_secs_f64());
-            t = std::time::Instant::now();
-        }
+        if prof { eprintln!("[prof] create_output: {:.3}s", t.elapsed().as_secs_f64()); t = std::time::Instant::now(); }
         let mut outputs = self.combine_outputs(&mut vec![second_pass_output], first_pass_output);
-        if prof {
-            eprintln!("[prof] combine_outputs: {:.3}s", t.elapsed().as_secs_f64());
-            t = std::time::Instant::now();
-        }
+        if prof { eprintln!("[prof] combine_outputs: {:.3}s", t.elapsed().as_secs_f64()); t = std::time::Instant::now(); }
         if let Some(new_df) = self.rm_unwanted_ticks(&mut outputs.df) {
             outputs.df = new_df;
         }
         Parser::add_item_purchase_sell_column(&mut outputs.game_events);
         Parser::remove_item_sold_events(&mut outputs.game_events);
-        if prof {
-            eprintln!("[prof] post-proc: {:.3}s", t.elapsed().as_secs_f64());
-        }
+        if prof { eprintln!("[prof] post-proc: {:.3}s", t.elapsed().as_secs_f64()); }
         Ok(outputs)
     }
     fn second_pass_threaded_with_channels(
         &self,
         outer_bytes: &[u8],
         first_pass_output: FirstPassOutput,
-        reciever: Receiver<StartEndOffset>,
+        receiver: Receiver<StartEndOffset>,
     ) -> Result<DemoOutput, DemoParserError> {
         thread::scope(|s| {
             let mut handles = vec![];
             let mut channel_threading_was_ok = true;
             loop {
-                if let Ok(start_end_offset) = reciever.recv_timeout(Duration::from_secs(3)) {
+                if let Ok(start_end_offset) = receiver.recv_timeout(Duration::from_secs(3)) {
                     match start_end_offset.msg_type {
                         StartEndType::EndOfMessages => break,
                         StartEndType::OK => {}
@@ -357,7 +345,6 @@ impl<'a> Parser<'a> {
                 convars: output.convars,
                 df: output.df,
                 header: Some(first_pass_output.header),
-                server_infos: first_pass_output.server_infos,
                 game_events_counter: output.game_events_counter,
                 projectiles: output.projectiles,
                 voice_data: output.voice_data,
@@ -434,7 +421,6 @@ impl<'a> Parser<'a> {
             convars,
             df: all_dfs_combined,
             header: Some(first_pass_output.header),
-            server_infos: first_pass_output.server_infos,
             game_events_counter: all_game_events,
             projectiles,
             voice_data,

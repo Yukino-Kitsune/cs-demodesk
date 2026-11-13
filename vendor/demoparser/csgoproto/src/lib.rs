@@ -1,4 +1,3 @@
-#![allow(warnings)]
 pub mod maps;
 pub mod message_type;
 
