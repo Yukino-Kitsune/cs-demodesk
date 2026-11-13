@@ -4,10 +4,6 @@
 # Verify a download with: gh attestation verify CS-DemoDesk-<version>.exe --owner noih
 name: release
 
-on:
-  push:
-    tags: ['v*']
-
 permissions:
   contents: write
   id-token: write
