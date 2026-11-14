@@ -1,6 +1,8 @@
 use super::entities::PlayerMetaData;
 use super::variants::Sticker;
 use super::variants::Variant;
+use crate::entity_handle::entity_handle_index;
+use crate::entity_handle::INVALID_ENTITY_ID;
 use crate::first_pass::prop_controller::*;
 use crate::first_pass::read_bits::DemoParserError;
 use crate::maps::BUTTONMAP;
@@ -14,37 +16,6 @@ use csgoproto::maps::PAINTKITS;
 use csgoproto::maps::STICKER_ID_TO_NAME;
 use csgoproto::maps::WEAPINDICIES;
 use std::fmt;
-
-fn dropped_equipment(class: &str, owner: Option<&Variant>, item: Option<&Variant>) -> Option<&'static str> {
-    if class.contains("Projectile") || class == "CInferno" { return None; }
-    // Source 2 transmits invalid handles as 24-bit all-ones; accept the full sentinel too.
-    if !matches!(owner, Some(Variant::U32(0x00ff_ffff | u32::MAX))) { return None; }
-    let Some(Variant::U32(item)) = item else { return None; };
-    // C4 has its own replay state. Contracts and other economy items are not weapons.
-    if !matches!(item, 1..=48 | 57 | 59..=61 | 63..=64 | 500..=526) { return None; }
-    WEAPINDICIES.get(item).copied()
-}
-
-#[cfg(test)]
-mod dropped_equipment_tests {
-    use super::*;
-
-    #[test]
-    fn only_ownerless_weapons_and_utility_are_dropped() {
-        let invalid = Variant::U32(u32::MAX);
-        for (id, name) in [(7, "AK-47"), (43, "Flashbang"), (45, "Smoke Grenade"), (48, "Incendiary Grenade")] {
-            assert_eq!(dropped_equipment("CSmokeGrenade", Some(&invalid), Some(&Variant::U32(id))), Some(name));
-            assert_eq!(dropped_equipment("CSmokeGrenade", Some(&Variant::U32(0x00ff_ffff)), Some(&Variant::U32(id))), Some(name));
-            assert_eq!(dropped_equipment("CSmokeGrenade", Some(&Variant::U32(10)), Some(&Variant::U32(id))), None);
-            assert_eq!(dropped_equipment("CSmokeGrenade", None, Some(&Variant::U32(id))), None);
-            assert_eq!(dropped_equipment("CSmokeGrenadeProjectile", Some(&invalid), Some(&Variant::U32(id))), None);
-        }
-        for id in [49, 50, 62, 999] {
-            assert_eq!(dropped_equipment("CWeapon", Some(&invalid), Some(&Variant::U32(id))), None);
-        }
-        assert_eq!(dropped_equipment("CWeapon", Some(&invalid), None), None);
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PropType {
@@ -99,6 +70,10 @@ impl<'a> SecondPassParser<'a> {
             }
             return;
         }
+        if self.parse_weapons {
+            self.collect_weapons();
+            return;
+        }
         if self.parse_projectiles {
             self.collect_projectiles();
             return;
@@ -142,7 +117,10 @@ impl<'a> SecondPassParser<'a> {
             } else {
                 for prop_info in &self.prop_controller.prop_infos {
                     let val = self.find_prop_with_collect_cache(prop_info, entity_id, player, &mut velocity_indicies, &mut button_mask);
-                    self.output.entry(prop_info.id).or_insert_with(PropColumn::new).push(val);
+                    self.output
+                        .entry(prop_info.id)
+                        .or_insert_with(PropColumn::new)
+                        .push(val);
                 }
             }
         }
@@ -232,10 +210,12 @@ impl<'a> SecondPassParser<'a> {
             }
         }
 
-        self.get_prop_from_ent(&USERCMD_BUTTONSTATE_1, entity_id).ok().and_then(|value| match value {
-            Variant::U64(button_mask) => Some(button_mask),
-            _ => None,
-        })
+        self.get_prop_from_ent(&USERCMD_BUTTONSTATE_1, entity_id)
+            .ok()
+            .and_then(|value| match value {
+                Variant::U64(button_mask) => Some(button_mask),
+                _ => None,
+            })
     }
 
     fn get_button_prop_cached(
@@ -263,7 +243,9 @@ impl<'a> SecondPassParser<'a> {
     }
     pub fn get_controller_prop(&self, prop_id: &u32, player: &PlayerMetaData) -> Result<Variant, PropCollectionError> {
         match player.controller_entid {
-            Some(entid) => return self.get_prop_from_ent(prop_id, &entid),
+            Some(entid) => {
+                return self.get_prop_from_ent(prop_id, &entid)
+            },
             None => return Err(PropCollectionError::ControllerEntityIdNotSet),
         }
     }
@@ -273,7 +255,7 @@ impl<'a> SecondPassParser<'a> {
             None => return Err(PropCollectionError::GrenadeOwnerIdNotSet),
         };
         match self.get_prop_from_ent(&owner_id, entity_id) {
-            Ok(Variant::U32(prop)) => Ok(prop & 0x7FF),
+            Ok(Variant::U32(prop)) => Ok(entity_handle_index(prop) as u32),
             Ok(_) => return Err(PropCollectionError::GrenadeOwnerIdPropIncorrectVariant),
             Err(e) => return Err(e),
         }
@@ -312,46 +294,21 @@ impl<'a> SecondPassParser<'a> {
     }
 
     pub fn collect_projectiles(&mut self) {
-        // Equipment has the same networked cell coordinates as projectiles. Only
-        // ownerless items are on the ground; missing ownership is not evidence of a drop.
-        let dropped: Vec<(i32, String)> = if self.parse_grenades {
-            self.entities.iter().flatten().filter_map(|ent| {
-                let class = &self.cls_by_id.get(ent.cls_id as usize)?.name;
-                let ids = &self.prop_controller.special_ids;
-                let owner = self.get_prop_from_ent(&ids.h_owner_entity?, &ent.entity_id).ok();
-                let item = self.get_prop_from_ent(&ids.item_def?, &ent.entity_id).ok();
-                Some((ent.entity_id, format!("dropped:{}", dropped_equipment(class, owner.as_ref(), item.as_ref())?)))
-            }).collect()
-        } else { Vec::new() };
-        let mut entities: Vec<(i32, Option<String>)> = self.projectiles.iter()
-            .filter(|id| !dropped.iter().any(|(dropped_id, _)| dropped_id == *id))
-            .map(|id| (*id, None)).collect();
-        entities.extend(dropped.into_iter().map(|(id, name)| (id, Some(name))));
-        for (entity_id, dropped_name) in entities {
-            let projectile_entid = &entity_id;
-            let is_dropped = dropped_name.is_some();
-            let grenade_type = match dropped_name.or_else(|| self.find_grenade_type(projectile_entid)) {
-                Some(t) => {
-                    if !t.contains("Projectile") && !self.parse_grenades {
-                        continue;
-                    } else {
-                        t
-                    }
-                }
+        for projectile_entid in &self.projectiles {
+            let grenade_type = match self.find_grenade_type(projectile_entid) {              
+                Some(t) => {if !t.contains("Projectile") && !self.parse_grenades{continue}else{t}},
                 None => continue,
             };
             let steamid = match self.find_thrower_steamid(projectile_entid) {
                 Ok(u) => u,
-                _ if grenade_type == "CInferno" || is_dropped => 0,
                 _ => continue,
             };
             let name = match self.find_thrower_name(projectile_entid) {
                 Ok(x) => x,
-                _ if grenade_type == "CInferno" || is_dropped => String::new(),
                 _ => continue,
             };
-            // Infernos use their fire cells; world items and flying projectiles use cell coordinates.
-            let (x, y, z) = if grenade_type.contains("Project") || is_dropped {
+            // Projectiles are the only ones with coordinates others map to 0.0, map them to None as it is clearer.
+            let (x, y, z) = if grenade_type.contains("Project") {
                 let x = self.collect_cell_coordinate_grenade(CoordinateAxis::X, projectile_entid).ok();
                 let y = self.collect_cell_coordinate_grenade(CoordinateAxis::Y, projectile_entid).ok();
                 let z = self.collect_cell_coordinate_grenade(CoordinateAxis::Z, projectile_entid).ok();
@@ -362,7 +319,7 @@ impl<'a> SecondPassParser<'a> {
 
             // Insert these always
             let pairs = vec![
-                (GRENADE_TYPE_ID, Some(Variant::String(grenade_type.clone()))),
+                (GRENADE_TYPE_ID, Some(Variant::String(grenade_type))),
                 (STEAMID_ID, Some(Variant::U64(steamid))),
                 (NAME_ID, Some(Variant::String(name))),
                 (TICK_ID, Some(Variant::I32(self.tick))),
@@ -388,29 +345,6 @@ impl<'a> SecondPassParser<'a> {
                 {
                     continue;
                 }
-                if prop_info.id == FIRE_POSITIONS_ID {
-                    // Reuse StringVec to transport the active XYZ cells without a new column type.
-                    let cells = if grenade_type == "CInferno" {
-                        (0..64)
-                            .filter_map(|i| {
-                                if self.get_prop_from_ent(&(FIRE_BURNING_ID + i), projectile_entid).ok() != Some(Variant::Bool(true)) {
-                                    return None;
-                                }
-                                match self.get_prop_from_ent(&(FIRE_POSITIONS_ID + i), projectile_entid).ok()? {
-                                    Variant::VecXYZ([x, y, z]) if x.is_finite() && y.is_finite() && z.is_finite() => Some(format!("{x},{y},{z}")),
-                                    _ => None,
-                                }
-                            })
-                            .collect()
-                    } else {
-                        Vec::new()
-                    };
-                    self.output
-                        .entry(prop_info.id)
-                        .or_insert_with(PropColumn::new)
-                        .push(Some(Variant::StringVec(cells)));
-                    continue;
-                }
                 let prop = match self.get_prop_from_ent(&prop_info.id, &projectile_entid) {
                     Ok(p) => Some(p),
                     _ => None,
@@ -427,6 +361,94 @@ impl<'a> SecondPassParser<'a> {
         }
     }
 
+    /// Weapons lying on the ground this tick: dropped on death, thrown with the drop key
+    /// or never picked up. A weapon with an owner is held (parented to the player, its
+    /// coordinates are relative) and is skipped. steamid/name refer to the previous owner
+    /// (m_hPrevOwner): the player who dropped it, None if it never had one.
+    pub fn collect_weapons(&mut self) {
+        let owner_id = match self.prop_controller.special_ids.h_owner_entity {
+            Some(id) => id,
+            None => return,
+        };
+        for weapon_entid in &self.weapons {
+            match self.get_prop_from_ent(&owner_id, weapon_entid) {
+                Ok(Variant::U32(handle)) => {
+                    if entity_handle_index(handle) != INVALID_ENTITY_ID {
+                        continue;
+                    }
+                }
+                Ok(_) => continue,
+                // Owner never sent: the entity has been ownerless since it was created
+                Err(_) => {}
+            }
+            let (steamid, name) = self.find_weapon_prev_owner(weapon_entid);
+            let weapon_name = self.find_weapon_name_from_weapon_entity(weapon_entid).ok();
+            let x = self.collect_cell_coordinate_grenade(CoordinateAxis::X, weapon_entid).ok();
+            let y = self.collect_cell_coordinate_grenade(CoordinateAxis::Y, weapon_entid).ok();
+            let z = self.collect_cell_coordinate_grenade(CoordinateAxis::Z, weapon_entid).ok();
+
+            // Insert these always
+            let pairs = vec![
+                (WEAPON_ENTITY_NAME_ID, weapon_name),
+                (STEAMID_ID, steamid.map(Variant::U64)),
+                (NAME_ID, name.map(Variant::String)),
+                (TICK_ID, Some(Variant::I32(self.tick))),
+                (ENTITY_ID_ID, Some(Variant::I32(*weapon_entid))),
+                (GRENADE_X, x),
+                (GRENADE_Y, y),
+                (GRENADE_Z, z),
+            ];
+            for pair in pairs {
+                self.output.entry(pair.0).or_insert_with(|| PropColumn::new()).push(pair.1);
+            }
+            // Extra props are read from the weapon entity itself
+            for prop_info in &self.prop_controller.prop_infos {
+                if prop_info.id == STEAMID_ID
+                    || prop_info.id == NAME_ID
+                    || prop_info.id == TICK_ID
+                    || prop_info.id == WEAPON_ENTITY_NAME_ID
+                    || prop_info.id == ENTITY_ID_ID
+                    || prop_info.id == GRENADE_X
+                    || prop_info.id == GRENADE_Y
+                    || prop_info.id == GRENADE_Z
+                {
+                    continue;
+                }
+                let prop = self.get_prop_from_ent(&prop_info.id, weapon_entid).ok();
+                self.output.entry(prop_info.id).or_insert_with(|| PropColumn::new()).push(prop);
+            }
+        }
+    }
+    /// Player who held the weapon last (m_hPrevOwner), if it maps to a known player
+    fn find_weapon_prev_owner(&self, entity_id: &i32) -> (Option<u64>, Option<String>) {
+        let prev_owner_id = match self.prop_controller.special_ids.weapon_prev_owner {
+            Some(id) => id,
+            None => return (None, None),
+        };
+        let pawn_entid = match self.get_prop_from_ent(&prev_owner_id, entity_id) {
+            Ok(Variant::U32(handle)) => entity_handle_index(handle),
+            _ => return (None, None),
+        };
+        match self.find_player_metadata(pawn_entid) {
+            Ok(metadata) => (metadata.steamid, metadata.name.clone()),
+            Err(_) => (None, None),
+        }
+    }
+    /// Weapon name read directly from a weapon entity (find_weapon_name goes through a player)
+    fn find_weapon_name_from_weapon_entity(&self, entity_id: &i32) -> Result<Variant, PropCollectionError> {
+        let item_def_id = match self.prop_controller.special_ids.item_def {
+            Some(x) => x,
+            None => return Err(PropCollectionError::SpecialidsItemDefNotSet),
+        };
+        match self.get_prop_from_ent(&item_def_id, entity_id) {
+            Ok(Variant::U32(def_idx)) => match WEAPINDICIES.get(&def_idx) {
+                Some(v) => Ok(Variant::String(v.to_string())),
+                None => Err(PropCollectionError::WeaponIdxMappingNotFound),
+            },
+            Ok(_) => Err(PropCollectionError::WeaponDefVariantWrongType),
+            Err(e) => Err(e),
+        }
+    }
     fn find_weapon_name(&self, entity_id: &i32) -> Result<Variant, PropCollectionError> {
         let item_def_id = match self.prop_controller.special_ids.item_def {
             Some(x) => x,
@@ -568,6 +590,10 @@ impl<'a> SecondPassParser<'a> {
             IS_ALIVE_ID => self.find_is_alive(entity_id),
             USERID_ID => self.get_userid(player),
             IS_AIRBORNE_ID => self.find_is_airborne(player),
+            STAMINA_ID => {
+                let id = self.prop_controller.special_ids.stamina.ok_or(PropCollectionError::GetPropFromEntPropNotFound)?;
+                self.get_prop_from_ent(&id, entity_id)
+            }
             AGENT_SKIN_ID => self.find_agent_skin(player),
             USERCMD_INPUT_HISTORY_BASEID => self.get_prop_from_ent(&USERCMD_INPUT_HISTORY_BASEID, entity_id),
             USERCMD_SUBTICK_MOVES_BASEID => self.get_prop_from_ent(&USERCMD_SUBTICK_MOVES_BASEID, entity_id),
@@ -626,7 +652,7 @@ impl<'a> SecondPassParser<'a> {
             return match self.get_prop_from_ent(&p, &eid) {
                 Ok(Variant::U32(weap_handle)) => {
                     // Could be more specific
-                    let weapon_entity_id = (weap_handle & 0x7FF) as i32;
+                    let weapon_entity_id = entity_handle_index(weap_handle);
                     self.find_stickers(&weapon_entity_id)
                 }
                 Ok(_) => Err(PropCollectionError::WeaponHandleIncorrectVariant),
@@ -777,7 +803,11 @@ impl<'a> SecondPassParser<'a> {
     ) -> Result<Variant, PropCollectionError> {
         self.collect_velocity_axis(player, axis)
     }
-    fn cached_velocity_indicies<'b>(&self, player: &PlayerMetaData, indicies_cache: &'b mut Option<Vec<usize>>) -> Result<&'b [usize], PropCollectionError> {
+    fn cached_velocity_indicies<'b>(
+        &self,
+        player: &PlayerMetaData,
+        indicies_cache: &'b mut Option<Vec<usize>>,
+    ) -> Result<&'b [usize], PropCollectionError> {
         if indicies_cache.is_none() {
             let steamid = player.steamid.ok_or(PropCollectionError::PlayerNotFound)?;
             *indicies_cache = Some(self.find_wanted_indicies(self.output.get(&STEAMID_ID), steamid));
@@ -891,7 +921,7 @@ impl<'a> SecondPassParser<'a> {
             match self.get_prop_from_ent(&(prop_id as u32), entity_id) {
                 Err(_e) => {}
                 Ok(Variant::U32(x)) => {
-                    let eid = (x & ((1 << 14) - 1)) as i32;
+                    let eid = entity_handle_index(x);
                     // Sometimes multiple references to same eid?
                     if unique_eids.contains(&eid) {
                         continue;
@@ -929,7 +959,7 @@ impl<'a> SecondPassParser<'a> {
             match self.get_prop_from_ent(&(prop_id as u32), entity_id) {
                 Err(_e) => {}
                 Ok(Variant::U32(x)) => {
-                    let eid = (x & ((1 << 14) - 1)) as i32;
+                    let eid = entity_handle_index(x);
                     // Sometimes multiple references to same eid?
                     if unique_eids.contains(&eid) {
                         continue;
@@ -966,7 +996,7 @@ impl<'a> SecondPassParser<'a> {
             match self.get_prop_from_ent(&(prop_id as u32), entity_id) {
                 Err(_e) => {}
                 Ok(Variant::U32(x)) => {
-                    let eid = (x & ((1 << 14) - 1)) as i32;
+                    let eid = entity_handle_index(x);
                     // Sometimes multiple references to same eid?
                     if unique_eids.contains(&eid) {
                         continue;
@@ -1078,7 +1108,7 @@ impl<'a> SecondPassParser<'a> {
         if let Some(c4ent) = self.c4_entity_id {
             if let Some(id) = self.prop_controller.special_ids.h_owner_entity {
                 if let Ok(Variant::U32(u)) = self.get_prop_from_ent(&id, &c4ent) {
-                    return Some((u & 0x7FF) as i32);
+                    return Some(entity_handle_index(u));
                 }
             }
         }
@@ -1132,7 +1162,7 @@ impl<'a> SecondPassParser<'a> {
         };
         return match self.get_prop_from_ent(&p, player_entid) {
             Ok(Variant::U32(weap_handle)) => {
-                let weapon_entity_id = (weap_handle & 0x7FF) as i32;
+                let weapon_entity_id = entity_handle_index(weap_handle);
                 self.find_weapon_skin_id(&weapon_entity_id)
             }
             Ok(_) => Err(PropCollectionError::WeaponHandleIncorrectVariant),
@@ -1160,7 +1190,7 @@ impl<'a> SecondPassParser<'a> {
         };
         return match self.get_prop_from_ent(&p, player_entid) {
             Ok(Variant::U32(weap_handle)) => {
-                let weapon_entity_id = (weap_handle & 0x7FF) as i32;
+                let weapon_entity_id = entity_handle_index(weap_handle);
                 self.find_weapon_skin(&weapon_entity_id)
             }
             Ok(_) => Err(PropCollectionError::WeaponHandleIncorrectVariant),
@@ -1223,7 +1253,7 @@ impl<'a> SecondPassParser<'a> {
         match self.get_prop_from_ent(&p, player_entid) {
             Ok(Variant::U32(weap_handle)) => {
                 // Could be more specific
-                let weapon_entity_id = (weap_handle & 0x7FF) as i32;
+                let weapon_entity_id = entity_handle_index(weap_handle);
                 match self.get_prop_from_ent(&prop, &weapon_entity_id) {
                     Ok(p) => Ok(p),
                     Err(e) => match e {
@@ -1310,7 +1340,7 @@ impl<'a> SecondPassParser<'a> {
             };
             let player_entid = match self.prop_controller.special_ids.player_pawn {
                 Some(id) => match self.get_prop_from_ent(&id, entity_id) {
-                    Ok(Variant::U32(handle)) => Some((handle & 0x7FF) as i32),
+                    Ok(Variant::U32(handle)) => Some(entity_handle_index(handle)),
                     Ok(_) => return Err(DemoParserError::IncorrectMetaDataProp),
                     Err(_) => None,
                 },

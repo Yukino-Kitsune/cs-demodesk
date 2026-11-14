@@ -12,9 +12,6 @@ fn main() -> Result<()> {
         .status()?;
 
     let protos = vec![
-        // CS2's current schemas use Valve-specific protobuf options declared here.
-        // Compile it alongside the dependent schemas so prost-build can resolve them.
-        "GameTracking-CS2/Protobufs/valveextensions.proto",
         "GameTracking-CS2/Protobufs/steammessages.proto",
         "GameTracking-CS2/Protobufs/gcsdk_gcmessages.proto",
         "GameTracking-CS2/Protobufs/demo.proto",

@@ -2,10 +2,8 @@ use crate::first_pass::read_bits::{Bitreader, DemoParserError};
 
 #[inline(always)]
 pub fn generate_fp() -> FieldPath {
-    let mut path = [0; 16];
-    path[0] = -1;
     FieldPath {
-        path,
+        path: [-1, 0, 0, 0, 0, 0, 0],
         last: 0,
     }
 }
@@ -61,26 +59,8 @@ pub fn do_op(opcode: u8, bitreader: &mut Bitreader, field_path: &mut FieldPath) 
 
 #[derive(Clone, Copy, Debug)]
 pub struct FieldPath {
-    // Keep more levels than current upstream's 7 so newer CS2 serializers can
-    // push deeper nested field paths without aborting the entire demo parse.
-    pub path: [i32; 16],
+    pub path: [i32; 7],
     pub last: usize,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn field_paths_support_deeper_nested_serializers() {
-        let mut path = generate_fp();
-        let mut bits = Bitreader::new(&[]);
-        for _ in 0..15 {
-            do_op(5, &mut bits, &mut path).unwrap();
-        }
-        assert_eq!(path.last, 15);
-        assert!(do_op(5, &mut bits, &mut path).is_err());
-    }
 }
 impl FieldPath {
     pub fn pop_special(&mut self, n: usize) -> Result<(), DemoParserError> {
@@ -165,14 +145,20 @@ fn push_one_left_delta_n_right_non_zero(bitreader: &mut Bitreader, field_path: &
     Ok(())
 }
 
-fn push_one_left_delta_n_right_non_zero_pack6_bits(bitreader: &mut Bitreader, field_path: &mut FieldPath) -> Result<(), DemoParserError> {
+fn push_one_left_delta_n_right_non_zero_pack6_bits(
+    bitreader: &mut Bitreader,
+    field_path: &mut FieldPath,
+) -> Result<(), DemoParserError> {
     *field_path.get_entry_mut(field_path.last)? += (bitreader.read_nbits(3)? + 2) as i32;
     field_path.last += 1;
     *field_path.get_entry_mut(field_path.last)? = (bitreader.read_nbits(3)? + 1) as i32;
     Ok(())
 }
 
-fn push_one_left_delta_n_right_non_zero_pack8_bits(bitreader: &mut Bitreader, field_path: &mut FieldPath) -> Result<(), DemoParserError> {
+fn push_one_left_delta_n_right_non_zero_pack8_bits(
+    bitreader: &mut Bitreader,
+    field_path: &mut FieldPath,
+) -> Result<(), DemoParserError> {
     *field_path.get_entry_mut(field_path.last)? += (bitreader.read_nbits(4)? + 2) as i32;
     field_path.last += 1;
     *field_path.get_entry_mut(field_path.last)? = (bitreader.read_nbits(4)? + 1) as i32;

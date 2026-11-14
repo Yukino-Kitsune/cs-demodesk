@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 bitter = "0.7.0"
-prost = "0.14"
+prost = "0.13.3"
 snap = "1.1.0"
 ahash = "0.8.3"
 regex = "1.7.3"
@@ -27,4 +27,8 @@ bytes = "1.5.0"
 path = "../csgoproto"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 
+[profile.dev]
+overflow-checks = false
 
+[profile.release]
+debug = true

@@ -1,5 +1,3 @@
-pub mod convars;
-pub mod animation_strings;
 pub mod fallbackbytes;
 pub mod frameparser;
 pub mod parser;
