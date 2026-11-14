@@ -1,6 +1,4 @@
-#[cfg(test)]
-pub mod e2e_test;
-mod entity_handle;
+#![allow(warnings)]
 pub mod first_pass;
 pub mod maps;
 pub mod parse_demo;

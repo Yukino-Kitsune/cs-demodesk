@@ -9,9 +9,13 @@ use crate::second_pass::parser_settings::SpecialIDs;
 use crate::second_pass::variants::Variant;
 use ahash::AHashMap;
 
-pub const PLAYER_ENTITY_HANDLE_MISSING: i32 = crate::entity_handle::INVALID_ENTITY_ID;
+pub const PLAYER_ENTITY_HANDLE_MISSING: i32 = 2047;
 pub const SPECTATOR_TEAM_NUM: u32 = 1;
 pub const BUTTONS_BASEID: u32 = 100000;
+pub const FIRE_POSITIONS_ID: u32 = 700000000;
+pub const FIRE_BURNING_ID: u32 = 700000100;
+pub const SMOKE_VOXELS_ID: u32 = 700100000;
+pub const SMOKE_VOXELS_LIMIT: u32 = 65536;
 pub const NORMAL_PROP_BASEID: u32 = 1000;
 pub const WEAPON_SKIN_NAME: u32 = 420420420;
 pub const WEAPON_ORIGINGAL_OWNER_ID: u32 = 6942000;
@@ -97,9 +101,6 @@ pub const GRENADE_X: u32 = 100100023;
 pub const GRENADE_Y: u32 = 100100024;
 pub const GRENADE_Z: u32 = 100100025;
 pub const INVENTORY_AS_IDS_BITMASK: u32 = 100100026;
-/// Name of a weapon lying on the ground (parse_weapons)
-pub const WEAPON_ENTITY_NAME_ID: u32 = 100100027;
-pub const STAMINA_ID: u32 = 100100028;
 
 #[derive(Clone, Debug)]
 pub struct PropController {
@@ -119,7 +120,6 @@ pub struct PropController {
     pub wanted_prop_states: AHashMap<String, Variant>,
     pub wanted_prop_state_infos: Vec<WantedPropStateInfo>,
     pub parse_projectiles: bool,
-    pub parse_weapons: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -152,7 +152,6 @@ impl PropController {
         needs_velocty: bool,
         wanted_events: &[String],
         parse_projectiles: bool,
-        parse_weapons: bool,
     ) -> Self {
         PropController {
             id: NORMAL_PROP_BASEID,
@@ -171,16 +170,10 @@ impl PropController {
             wanted_prop_states,
             wanted_prop_state_infos: vec![],
             parse_projectiles: parse_projectiles,
-            parse_weapons: parse_weapons,
         }
     }
 
     pub fn set_custom_propinfos(&mut self) {
-        // Early demos stored stamina directly on the pawn.
-        self.special_ids.stamina = self.name_to_id
-            .get("CCSPlayerPawn.CCSPlayer_MovementServices.m_flStamina")
-            .or_else(|| self.name_to_id.get("CCSPlayerPawn.m_flStamina"))
-            .copied();
         let button_names = BUTTONMAP.keys();
         let mut someid = BUTTONS_BASEID;
         let mut someid2 = BUTTONS_BASEID;
@@ -340,32 +333,6 @@ impl PropController {
                 is_player_prop: true,
             });
         }
-        // Weapons on the ground specific
-        if self.parse_weapons {
-            self.prop_infos.push(PropInfo {
-                id: ENTITY_ID_ID,
-                prop_type: PropType::Custom,
-                prop_name: "entity_id".to_string(),
-                prop_friendly_name: "entity_id".to_string(),
-                is_player_prop: true,
-            });
-            self.prop_infos.push(PropInfo {
-                id: WEAPON_ENTITY_NAME_ID,
-                prop_type: PropType::Custom,
-                prop_name: "weapon".to_string(),
-                prop_friendly_name: "weapon".to_string(),
-                is_player_prop: true,
-            });
-            for (id, name) in [(GRENADE_X, "x"), (GRENADE_Y, "y"), (GRENADE_Z, "z")] {
-                self.prop_infos.push(PropInfo {
-                    id,
-                    prop_type: PropType::Custom,
-                    prop_name: name.to_string(),
-                    prop_friendly_name: name.to_string(),
-                    is_player_prop: true,
-                });
-            }
-        }
         self.prop_infos.push(PropInfo {
             id: TICK_ID,
             prop_type: PropType::Tick,
@@ -485,6 +452,13 @@ impl PropController {
     }
     pub fn handle_prop(&mut self, full_name: &str, f: &mut ValueField, path: Vec<i32>) {
         f.full_name = full_name.to_string();
+        // The legacy statistics name omits send_node and aliases these two vectors.
+        // Analysis retains their recorded owner separately, without changing basic property IDs.
+        f.analysis_name = if matches!(f.send_node.as_str(), "m_vecViewOffset" | "m_vecVelocity") && matches!(f.name.as_str(), "m_vecX" | "m_vecY" | "m_vecZ") {
+            full_name.rsplit_once('.').map(|(owner, leaf)| format!("{owner}.{}.{leaf}", f.send_node))
+        } else {
+            None
+        };
 
         let prop_name = split_weapon_prefix_from_prop_name(full_name);
 
@@ -495,6 +469,20 @@ impl PropController {
         self.path_to_name.insert(a, prop_name.to_string());
         let grenade_or_weapon = is_grenade_or_weapon(full_name);
 
+        if prop_name == "m_firePositions" || prop_name == "m_bFireIsBurning" || prop_name == "m_VoxelFrameData" {
+            f.prop_id = match prop_name.as_str() {
+                "m_firePositions" => FIRE_POSITIONS_ID,
+                "m_bFireIsBurning" => FIRE_BURNING_ID,
+                _ => SMOKE_VOXELS_ID,
+            };
+            if !self.name_to_id.contains_key(&prop_name) {
+                self.name_to_id.insert(prop_name.clone(), f.prop_id);
+                self.id_to_name.insert(f.prop_id, prop_name.clone());
+                self.insert_propinfo(full_name, f);
+            }
+            f.should_parse = true;
+            return;
+        }
         let prop_already_exists = self.name_to_id.contains_key(&(prop_name).to_string());
         self.set_id(&prop_name, f, grenade_or_weapon);
 
@@ -527,7 +515,7 @@ impl PropController {
         if full_name.starts_with("CCSPlayerPawn") && prop_name.contains("CEconItemAttribute.m_iRawValue32") {
             f.prop_id = GLOVE_PAINT_ID as u32;
         }
-        if full_name == "CCSPlayerPawn.CCSPlayer_WeaponServices.m_iAmmo"{
+        if full_name == "CCSPlayerPawn.CCSPlayer_WeaponServices.m_iAmmo" {
             f.prop_id = GRENADE_AMMO_ID;
         }
         self.id += 1;
@@ -538,7 +526,6 @@ impl PropController {
             match name {
                 "m_bIsIncGrenade" => self.special_ids.is_incendiary_grenade = Some(id),
                 "m_hOwnerEntity" => self.special_ids.h_owner_entity = Some(id),
-                "m_hPrevOwner" => self.special_ids.weapon_prev_owner = Some(id),
                 "m_nOwnerId" => self.special_ids.grenade_owner_id = Some(id),
                 "CBodyComponentBaseAnimGraph.m_vecX" => self.special_ids.m_vec_x_grenade = Some(id),
                 "CBodyComponentBaseAnimGraph.m_vecY" => self.special_ids.m_vec_y_grenade = Some(id),
