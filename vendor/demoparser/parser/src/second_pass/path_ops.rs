@@ -2,8 +2,10 @@ use crate::first_pass::read_bits::{Bitreader, DemoParserError};
 
 #[inline(always)]
 pub fn generate_fp() -> FieldPath {
+    let mut path = [0; 16];
+    path[0] = -1;
     FieldPath {
-        path: [-1, 0, 0, 0, 0, 0, 0],
+        path,
         last: 0,
     }
 }
@@ -59,8 +61,26 @@ pub fn do_op(opcode: u8, bitreader: &mut Bitreader, field_path: &mut FieldPath) 
 
 #[derive(Clone, Copy, Debug)]
 pub struct FieldPath {
-    pub path: [i32; 7],
+    // Keep more levels than current upstream's 7 so newer CS2 serializers can
+    // push deeper nested field paths without aborting the entire demo parse.
+    pub path: [i32; 16],
     pub last: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn field_paths_support_deeper_nested_serializers() {
+        let mut path = generate_fp();
+        let mut bits = Bitreader::new(&[]);
+        for _ in 0..15 {
+            do_op(5, &mut bits, &mut path).unwrap();
+        }
+        assert_eq!(path.last, 15);
+        assert!(do_op(5, &mut bits, &mut path).is_err());
+    }
 }
 impl FieldPath {
     pub fn pop_special(&mut self, n: usize) -> Result<(), DemoParserError> {

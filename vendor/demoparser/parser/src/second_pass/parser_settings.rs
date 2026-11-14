@@ -250,7 +250,7 @@ impl<'a> SecondPassParser<'a> {
             paths: vec![
                 FieldPath {
                     last: 0,
-                    path: [0, 0, 0, 0, 0, 0, 0],
+                    path: [0; 16],
                 };
                 8192
             ],
