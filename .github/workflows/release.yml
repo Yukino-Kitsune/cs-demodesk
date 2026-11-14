@@ -22,9 +22,15 @@ jobs:
       - name: Install Protocol Buffers compiler
         uses: arduino/setup-protoc@v3
         with:
-          version: "33.x"
+          version: "latest"
 
       - uses: Swatinem/rust-cache@v2
+
+      - name: Refresh protobuf Rust dependency locks
+        run: |
+          cargo update -p prost
+          cargo update --manifest-path vendor/demoparser/csgoproto/Cargo.toml -p prost
+          cargo update --manifest-path vendor/demoparser/csgoproto/Cargo.toml -p prost-build
 
       - run: npm ci
       - run: npm run app:build
