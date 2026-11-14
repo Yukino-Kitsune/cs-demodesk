@@ -1,7 +1,7 @@
 import { EditingEffects } from './EditingEffects.tsx';
 import { DialogCloseButton } from './DialogCloseButton.tsx';
 import { summarizeHighlights } from '../highlightWindows.ts';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Box, Button, Dialog, Flex, Grid, SegmentedControl, Select, Slider, Switch, Text } from '@radix-ui/themes';
 import { useTranslation } from 'react-i18next';
 import { errorText, DEFAULT_RENDER_OPTIONS, RENDER_QUALITY, type Highlight, type RenderOptions, type Status } from '../api.ts';
@@ -10,6 +10,8 @@ const RESOLUTIONS = [
   { label: '1080p', width: 1920, height: 1080 },
   { label: '2K', width: 2560, height: 1440 },
   { label: '4K', width: 3840, height: 2160 },
+  { label: '1440×1080 (4:3) stretched → 1920×1080', width: 1920, height: 1080 },
+  { label: '1920×1440 (4:3) stretched → 2560×1440', width: 2560, height: 1440 },
 ];
 /** HUD switches in the export dialog, in display order. */
 const HUD_TOGGLES = ['hud', 'playerAvatars', 'crosshair', 'radar', 'killFeed', 'chat', 'viewmodel', 'tracers', 'xray', 'trueView'] as const;
@@ -20,7 +22,11 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
   onSubmit:(options:RenderOptions)=>Promise<unknown>;onSubmitted:()=>void;forceMerge?:boolean;disabled?:boolean;children?:ReactNode;
 }) {
   const {t}=useTranslation();
-  const [opts,setOpts]=useState<RenderOptions>(DEFAULT_RENDER_OPTIONS);
+  const [opts,setOpts]=useState<RenderOptions>(()=>{
+    try { return { ...DEFAULT_RENDER_OPTIONS, ...JSON.parse(localStorage.getItem('clip-export-options') ?? '{}') }; }
+    catch { return DEFAULT_RENDER_OPTIONS; }
+  });
+  useEffect(()=>{try { localStorage.setItem('clip-export-options',JSON.stringify(opts)); } catch { /* storage may be unavailable */ }},[opts]);
   const [submitting,setSubmitting]=useState(false);
   const [error,setError]=useState<string>();
   const preview = highlights && tickRate ? summarizeHighlights(highlights, tickRate, opts.keyMomentsOnly, opts.shortCombatClips) : undefined;
@@ -85,15 +91,15 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
                 </Text>
                 <SegmentedControl.Root
                   size="1"
-                  value={String(opts.width)}
+                  value={`${opts.width}x${opts.height}`}
                   onValueChange={(v) => {
-                    const r = RESOLUTIONS.find((x) => x.width === Number(v))!;
+                    const r = RESOLUTIONS.find((x) => `${x.width}x${x.height}` === v)!;
                     setOpts({ ...opts, width: r.width, height: r.height });
                   }}
                   style={{ width: '100%' }}
                 >
                   {RESOLUTIONS.map((r) => (
-                    <SegmentedControl.Item key={r.width} value={String(r.width)} title={`${r.width} × ${r.height}`}>
+                    <SegmentedControl.Item key={`${r.width}x${r.height}-${r.label}`} value={`${r.width}x${r.height}`} title={`${r.width} × ${r.height}`}>
                       {r.label}
                     </SegmentedControl.Item>
                   ))}
@@ -105,8 +111,13 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
                   FPS
                 </Text>
                 <SegmentedControl.Root size="1" value={String(opts.fps)} onValueChange={(v) => setOpts({ ...opts, fps: Number(v) })} style={{ width: '100%' }}>
-                  <SegmentedControl.Item value="30">30</SegmentedControl.Item>
-                  <SegmentedControl.Item value="60">60</SegmentedControl.Item>
+                  {[30, 60, 90, 120].map(fps=><SegmentedControl.Item key={fps} value={String(fps)}>{fps}</SegmentedControl.Item>)}
+                </SegmentedControl.Root>
+              </Box>
+              <Box>
+                <Text as="div" size="1" color="gray" mb="1">Motion blur factor (higher recording FPS, blended into final output)</Text>
+                <SegmentedControl.Root size="1" value={String(opts.motionBlurFactor)} onValueChange={v=>setOpts({...opts,motionBlurFactor:Number(v)})} style={{width:'100%'}}>
+                  {[0,1,2,3,4,5].map(factor=><SegmentedControl.Item key={factor} value={String(factor)}>{factor}x</SegmentedControl.Item>)}
                 </SegmentedControl.Root>
               </Box>
               <Box>

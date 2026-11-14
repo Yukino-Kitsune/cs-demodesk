@@ -266,9 +266,16 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
                 .replace(':', "\\:");
             let filter = format!("drawtext=fontfile='{font}':text='{label}':fontcolor=white:fontsize=h/30:box=1:boxcolor=black@0.6:boxborderw=10:x=(w-tw)/2:y=h*0.22:enable='gte(t,{from:.6})'");
             encoding.push_str(&format!(
-                " -vf {{QUOTE}}{}{{QUOTE}}",
+                " -vf {{QUOTE}}{}{}{{QUOTE}}",
+                if r.motion_blur_factor > 0 {
+                    format!("tmix=frames={}:weights='{}',fps={},", r.motion_blur_factor + 1, vec!["1"; (r.motion_blur_factor + 1) as usize].join(" "), r.fps)
+                } else { String::new() },
                 filter.replace('\\', "\\\\")
             ));
+        } else if r.motion_blur_factor > 0 {
+            let frames = r.motion_blur_factor + 1;
+            let weights = vec!["1"; frames as usize].join(" ");
+            encoding.push_str(&format!(" -vf {{QUOTE}}tmix=frames={frames}:weights='{weights}',fps={}{{QUOTE}}", r.fps));
         }
         push(setup_tick, &mut slot, format!("mirv_streams settings add ffmpeg {preset} \"{} {{QUOTE}}{folder}\\\\video.{}{{QUOTE}}\"", encoding, r.container));
         push(
@@ -279,7 +286,7 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
         push(
             setup_tick,
             &mut slot,
-            format!("mirv_streams record fps {}", r.fps),
+            format!("mirv_streams record fps {}", r.fps * (r.motion_blur_factor + 1)),
         );
 
         // 3. Camera on the highlighted player (after the seek, before recording).

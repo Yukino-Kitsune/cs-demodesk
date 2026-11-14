@@ -179,6 +179,7 @@ pub fn run_setup(
 #[serde(rename_all = "camelCase", default)]
 pub struct RenderOptions {
     pub fps: u32,
+    pub motion_blur_factor: u32,
     pub width: u32,
     pub height: u32,
     /// One of encode::CODECS.
@@ -230,6 +231,7 @@ impl Default for RenderOptions {
     fn default() -> Self {
         Self {
             fps: 60,
+            motion_blur_factor: 0,
             width: 1920,
             height: 1080,
             codec: "libsvtav1".into(),

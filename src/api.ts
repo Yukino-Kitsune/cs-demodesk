@@ -218,6 +218,7 @@ export interface RenderOptions {
   combatPerspectives: boolean;
   teamPush: boolean;
   fps: number;
+  motionBlurFactor: number;
   width: number;
   height: number;
   codec: string;
@@ -262,6 +263,7 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   combatPerspectives: false,
   teamPush: false,
   fps: 60,
+  motionBlurFactor: 0,
   width: 1920,
   height: 1080,
   codec: 'libsvtav1',
