@@ -1,10 +1,7 @@
-# Manually build and publish the portable EXE.
+# Manually build the portable EXE and attach it to the workflow run.
 name: release
 
 on: workflow_dispatch
-
-permissions:
-  contents: write
 
 jobs:
   build:
@@ -43,10 +40,12 @@ jobs:
               "$hash  $($_.Name)"
             } | Out-File -Encoding ascii 'dist-portable/SHA256SUMS'
 
-      - name: Publish prepared release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
-          RELEASE_COMMIT: ${{ github.sha }}
-        run: ./scripts/publish-release.ps1 -Tag $env:RELEASE_TAG -Repository $env:GITHUB_REPOSITORY -Commit $env:RELEASE_COMMIT
+      - name: Upload portable EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: CS-DemoDesk-${{ github.run_number }}
+          path: |
+            dist-portable/*.exe
+            dist-portable/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 90
