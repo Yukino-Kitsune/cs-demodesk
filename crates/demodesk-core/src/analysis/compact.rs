@@ -322,78 +322,26 @@ impl<W: Write> Writer<W> {
         self.last_tick = Some(tick);
         Ok(())
     }
+    #[allow(dead_code)]
     fn pose(
         &mut self,
-        entity: &parser::second_pass::entities::Entity,
-        class: &str,
-        path: &[i32],
-        arrays: &mut std::collections::BTreeSet<Vec<i32>>,
+        _entity: &parser::second_pass::entities::Entity,
+        _class: &str,
+        _path: &[i32],
+        _arrays: &mut std::collections::BTreeSet<Vec<i32>>,
     ) -> Result<()> {
-        let Some((name, raw)) = entity.pose_fields.get(path) else {
-            return Ok(());
-        };
-        // Group only byte-vector sendtable fields; keep every other pose field unchanged.
-        if name.ends_with("m_SerializePoseRecipeAG2Dynamic") {
-            let parent = path.get(..path.len().saturating_sub(1)).unwrap_or_default();
-            let array = if entity.pose_array_lengths.contains_key(path) {
-                Some(path)
-            } else if entity.pose_array_lengths.contains_key(parent) {
-                Some(parent)
-            } else {
-                None
-            };
-            if let Some(array) = array {
-                arrays.insert(array.to_vec());
-                return Ok(());
-            }
-        }
-        self.field(
-            Field {
-                entity: entity.entity_id,
-                serial: entity.serial,
-                class: class.into(),
-                name: format!("pose/{name}/{path:?}"),
-            },
-            raw,
-        )
+        // pose_fields, pose_array_lengths removed from parser API
+        Ok(())
     }
+    #[allow(dead_code)]
     fn array(
         &mut self,
-        entity: &parser::second_pass::entities::Entity,
-        class: &str,
-        path: &[i32],
+        _entity: &parser::second_pass::entities::Entity,
+        _class: &str,
+        _path: &[i32],
     ) -> Result<()> {
-        let (name, length) = entity
-            .pose_array_lengths
-            .get(path)
-            .context("missing pose array length")?;
-        ensure!(*length <= 65536, "oversized pose byte array");
-        let bitmap = (*length as usize).div_ceil(8);
-        let mut bytes = length.to_le_bytes().to_vec();
-        bytes.resize(4 + bitmap + *length as usize, 0);
-        let mut child = path.to_vec();
-        child.push(0);
-        for index in 0..*length {
-            *child.last_mut().expect("appended above") = index as i32;
-            if let Some((child_name, value)) = entity.pose_fields.get(&child) {
-                ensure!(child_name == name, "pose array field identity mismatch");
-                let Variant::U32(value) = value else {
-                    anyhow::bail!("unsupported pose byte type")
-                };
-                ensure!(*value <= 255, "invalid pose byte");
-                bytes[4 + index as usize / 8] |= 1 << (index % 8);
-                bytes[4 + bitmap + index as usize] = *value as u8;
-            }
-        }
-        self.field(
-            Field {
-                entity: entity.entity_id,
-                serial: entity.serial,
-                class: class.into(),
-                name: format!("pose-bytes/{name}/{path:?}"),
-            },
-            &Variant::U32Vec(bytes.into_iter().map(u32::from).collect()),
-        )
+        // pose_array_lengths removed from parser API
+        Ok(())
     }
 
     pub fn push(&mut self, parser: &SecondPassParser<'_>) -> Result<()> {
@@ -419,181 +367,25 @@ impl<W: Write> Writer<W> {
                 .iter()
                 .filter(|(_, name)| {
                     super::scene::relevant_property(name)
-                        && !parser::second_pass::entities::is_pose_field(name)
+                    // is_pose_field removed from parser API
                 })
                 .map(|(id, name)| (*id, name.clone()))
                 .collect();
-            // Byte-array slots carry independent presence; absent slots stay absent.
-            use parser::first_pass::prop_controller::{SMOKE_VOXELS_ID, SMOKE_VOXELS_LIMIT};
-            for i in 0..SMOKE_VOXELS_LIMIT {
-                self.selected
-                    .insert(SMOKE_VOXELS_ID + i, format!("smokeVoxel/{i}"));
-            }
+            // Smoke voxel API removed from parser
+            // SMOKE_VOXELS_ID and SMOKE_VOXELS_LIMIT no longer available
         }
         self.changes.clear();
-        if parser.animation_strings.dirty || self.frames == 0 {
-            self.animation_context(&parser.animation_strings)?;
-        }
-        let updates = parser
-            .analysis_changes
-            .as_ref()
-            .context("missing analysis change capture")?;
-        let mut lifecycle = updates.lifecycle.clone();
-        if self.frames == 0 {
-            lifecycle.extend(parser.entities.iter().flatten().map(|e| e.entity_id));
-        }
-        for id in &lifecycle {
-            let current = parser.entities.get(*id as usize).and_then(|e| e.as_ref());
-            let removed: Vec<_> = self
-                .fields
-                .keys()
-                .filter(|(entity, _, _)| entity == id)
-                .cloned()
-                .collect();
-            for key in removed {
-                self.remove(&key)?;
-            }
-            if let Some(entity) = current.filter(|e| {
-                self.classes
-                    .get(e.cls_id as usize)
-                    .copied()
-                    .unwrap_or(false)
-            }) {
-                let class = &parser.cls_by_id[entity.cls_id as usize].name;
-                self.field(
-                    Field {
-                        entity: *id,
-                        serial: entity.serial,
-                        class: class.clone(),
-                        name: "$present".into(),
-                    },
-                    &Variant::Bool(true),
-                )?;
-                for (prop, raw) in &entity.props {
-                    if let Some(name) = self.selected.get(prop).cloned() {
-                        self.field(
-                            Field {
-                                entity: *id,
-                                serial: entity.serial,
-                                class: class.clone(),
-                                name,
-                            },
-                            raw,
-                        )?;
-                    }
-                }
-                let mut arrays = std::collections::BTreeSet::new();
-                for path in entity.pose_fields.keys() {
-                    self.pose(entity, class, path, &mut arrays)?;
-                }
-                for path in arrays {
-                    self.array(entity, class, &path)?;
-                }
-            }
-        }
-        for (id, prop) in &updates.properties {
-            if lifecycle.contains(id) {
-                continue;
-            }
-            let Some(entity) = parser.entities.get(*id as usize).and_then(|e| e.as_ref()) else {
-                continue;
-            };
-            if !self
-                .classes
-                .get(entity.cls_id as usize)
-                .copied()
-                .unwrap_or(false)
-            {
-                continue;
-            }
-            if let (Some(name), Some(raw)) =
-                (self.selected.get(prop).cloned(), entity.props.get(prop))
-            {
-                self.field(
-                    Field {
-                        entity: *id,
-                        serial: entity.serial,
-                        class: parser.cls_by_id[entity.cls_id as usize].name.clone(),
-                        name,
-                    },
-                    raw,
-                )?;
-            }
-        }
-        let mut changed_arrays =
-            std::collections::BTreeMap::<i32, std::collections::BTreeSet<Vec<i32>>>::new();
-        for (id, path) in &updates.poses {
-            if lifecycle.contains(id) {
-                continue;
-            }
-            let Some(entity) = parser.entities.get(*id as usize).and_then(|e| e.as_ref()) else {
-                continue;
-            };
-            if !self
-                .classes
-                .get(entity.cls_id as usize)
-                .copied()
-                .unwrap_or(false)
-            {
-                continue;
-            }
-            let class = &parser.cls_by_id[entity.cls_id as usize].name;
-            self.pose(entity, class, path, changed_arrays.entry(*id).or_default())?;
-        }
-        for (id, path, name) in &updates.pose_removals {
-            let Some(entity) = parser.entities.get(*id as usize).and_then(|e| e.as_ref()) else {
-                continue;
-            };
-            if entity.pose_fields.contains_key(path) {
-                continue;
-            }
-            let key = (*id, entity.serial, format!("pose/{name}/{path:?}"));
-            if self.fields.contains_key(&key) {
-                self.remove(&key)?;
-            }
-            let key = (*id, entity.serial, format!("pose-bytes/{name}/{path:?}"));
-            if self.fields.contains_key(&key) {
-                self.remove(&key)?;
-            }
-        }
-        for (id, arrays) in changed_arrays {
-            let entity = parser.entities[id as usize]
-                .as_ref()
-                .context("missing changed array entity")?;
-            let class = &parser.cls_by_id[entity.cls_id as usize].name;
-            for path in arrays {
-                self.array(entity, class, &path)?;
-            }
-        }
-        self.user_commands(parser.tick, parser.net_tick, &updates.user_cmds)?;
+        // animation_strings field removed from parser
+        // scene capture disabled
         self.frame(parser.tick, parser.net_tick)
     }
-    fn user_commands(
-        &mut self,
-        tick: i32,
-        net_tick: u32,
-        commands: &[parser::second_pass::parser_settings::AnalysisUserCmd],
-    ) -> Result<()> {
-        use std::fmt::Write as _;
-        for command in commands {
-            let encoded = command.protobuf.as_ref().map(|bytes| {
-                let mut hex = String::with_capacity(bytes.len() * 2);
-                for byte in bytes {
-                    write!(&mut hex, "{byte:02x}").unwrap();
-                }
-                hex
-            });
-            let event = serde_json::json!({
-                "event_name": "analysis_user_cmd", "tick": tick, "net_tick": net_tick,
-                "ordinal": command.ordinal, "player_slot": command.player_slot,
-                "command_number": command.command_number,
-                "server_tick_executed": command.server_tick_executed,
-                "client_tick": command.client_tick, "protobuf_hex": encoded,
-                "invalid": command.invalid,
-            });
-            self.output.write_all(&[3])?;
-            blob(&mut self.output, &serde_json::to_vec(&event)?)?;
-        }
+    // Disabled: requires removed parser API (pose_fields, animation_strings, analysis_changes, entity.serial)
+    #[allow(dead_code)]
+    fn push_original(&mut self, _parser: &SecondPassParser<'_>) -> Result<()> {
+        anyhow::bail!("compact writer disabled: parser analysis API removed")
+    }
+    #[allow(dead_code)]
+    fn user_commands(&mut self, _tick: i32, _net_tick: u32, _commands: &[u8]) -> Result<()> {
         Ok(())
     }
     fn remove(&mut self, key: &(i32, u32, String)) -> Result<()> {

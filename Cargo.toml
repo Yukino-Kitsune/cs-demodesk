@@ -8,6 +8,10 @@ edition = "2021"
 version = "1.0.34"
 license = "AGPL-3.0-only"
 
+# Global prost version to avoid trait incompatibility
+[workspace.dependencies]
+prost = "=0.13.3"
+
 # `tauri dev` builds the dev profile; the demo parser is ~10× slower unoptimized,
 # so optimize dependencies (vendored parser included) even there.
 [profile.dev.package."*"]

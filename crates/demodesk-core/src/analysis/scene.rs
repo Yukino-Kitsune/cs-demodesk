@@ -216,7 +216,7 @@ mod tests {
         }
     }
     use parser::first_pass::{
-        prop_controller::SMOKE_VOXELS_ID,
+        // prop_controller::SMOKE_VOXELS_ID, // removed from parser API
         read_bits::Bitreader,
         sendtables::{get_propinfo, Field, ValueField},
     };
