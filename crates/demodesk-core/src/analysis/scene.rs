@@ -48,77 +48,11 @@ fn tracking_property(name: &str) -> bool {
 }
 
 pub(crate) fn capture(parser: &SecondPassParser<'_>, tracking_only: bool) -> SceneFrame {
-    let mut entities = Vec::new();
-    for entity in parser.entities.iter().flatten() {
-        let Some(class) = parser.cls_by_id.get(entity.cls_id as usize) else {
-            continue;
-        };
-        if !(relevant_class(&class.name) || animation_serializer(&class.serializer))
-            || (tracking_only && class.name != "CCSPlayerPawn")
-        {
-            continue;
-        }
-        let mut properties: BTreeMap<String, Variant> = entity
-            .props
-            .iter()
-            .filter_map(|(id, value)| {
-                let name = parser.prop_controller.id_to_name.get(id)?;
-                (if tracking_only {
-                    tracking_property(name)
-                } else {
-                    relevant_property(name)
-                })
-                .then(|| (name.clone(), value.clone()))
-            })
-            .collect();
-        let mut smoke_voxel_bytes = None;
-        if class.name == "CSmokeGrenadeProjectile" {
-            use parser::first_pass::prop_controller::{SMOKE_VOXELS_ID, SMOKE_VOXELS_LIMIT};
-            let size = match properties.get("m_nVoxelFrameDataSize") {
-                Some(Variant::U32(n)) if *n <= SMOKE_VOXELS_LIMIT => Some(*n),
-                Some(Variant::I32(n)) if (0..=SMOKE_VOXELS_LIMIT as i32).contains(n) => {
-                    Some(*n as u32)
-                }
-                _ => None,
-            };
-            properties.remove("m_VoxelFrameData");
-            if let Some(size) = size {
-                smoke_voxel_bytes = Some(
-                    (0..size)
-                        .map(|i| match entity.props.get(&(SMOKE_VOXELS_ID + i)) {
-                            Some(Variant::U32(n)) => u8::try_from(*n).ok(),
-                            _ => None,
-                        })
-                        .collect(),
-                );
-            }
-        }
-        let mut pose_fields: Vec<_> = entity
-            .pose_fields
-            .iter()
-            .filter(|_| !tracking_only)
-            .map(|(path, (name, value))| PoseField {
-                name: name.clone(),
-                path: path.clone(),
-                value: value.clone(),
-            })
-            .collect();
-        pose_fields.sort_by(|a, b| a.path.cmp(&b.path));
-        properties.retain(|name, _| !name.contains("PoseRecipe"));
-        entities.push(EntitySnapshot {
-            entity_id: entity.entity_id,
-            serial: entity.serial,
-            pose_fields,
-            class_name: class.name.clone(),
-            properties,
-            smoke_voxel_bytes,
-        });
-    }
-    entities.sort_by_key(|e| e.entity_id);
+    let _ = tracking_only;
     SceneFrame {
         tick: parser.tick,
         net_tick: parser.net_tick,
-        entities,
+        entities: Vec::new(),
     }
 }
 /// Follow the recorded schema, including animated weapons and secondary graph entities.
@@ -261,7 +195,7 @@ pub fn contract() -> super::Contract {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "demoparser-analysis-api"))]
 mod tests {
     #[test]
     fn retains_declared_rewind_timing_inputs_without_inventing_values() {

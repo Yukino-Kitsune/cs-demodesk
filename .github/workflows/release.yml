@@ -23,12 +23,6 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Refresh protobuf Rust dependency locks
-        run: |
-          cargo update -p prost
-          cargo update --manifest-path vendor/demoparser/csgoproto/Cargo.toml -p prost
-          cargo update --manifest-path vendor/demoparser/csgoproto/Cargo.toml -p prost-build
-
       - run: npm ci
       - run: npm run app:build
 

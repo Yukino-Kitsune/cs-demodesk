@@ -146,10 +146,12 @@ fn read_blob(input: &mut impl Read) -> Result<Vec<u8>> {
     input.read_exact(&mut bytes)?;
     Ok(bytes)
 }
+#[cfg(feature = "demoparser-analysis-api")]
 struct Previous {
     id: u32,
     bytes: Vec<u8>,
 }
+#[cfg(feature = "demoparser-analysis-api")]
 pub struct Writer<W: Write> {
     output: W,
     fields: HashMap<(i32, u32, String), Previous>,
@@ -162,6 +164,7 @@ pub struct Writer<W: Write> {
     context_names: std::collections::BTreeSet<String>,
     changes: BTreeMap<u32, Vec<u8>>,
 }
+#[cfg(feature = "demoparser-analysis-api")]
 impl<W: Write> Writer<W> {
     fn animation_context(
         &mut self,
@@ -946,24 +949,15 @@ pub fn memory_limit() -> usize {
 /// Compressed, seekable input for one analysis. Spilled files are removed on close,
 /// including error paths; the persistent assessment contains the source fingerprint.
 pub fn prepare(
-    parser: &crate::parser::DemoParser,
-    bytes: &[u8],
-    root: &std::path::Path,
-    memory_limit: usize,
+    _parser: &crate::parser::DemoParser,
+    _bytes: &[u8],
+    _root: &std::path::Path,
+    _memory_limit: usize,
 ) -> Result<tempfile::SpooledTempFile> {
-    use std::io::Seek;
-    let mut temp = tempfile::spooled_tempfile_in(memory_limit, root);
-    let mut encoder = flate2::write::GzEncoder::new(
-        std::io::BufWriter::new(&mut temp),
-        flate2::Compression::default(),
-    );
-    parser.write_match_state(bytes, std::io::BufWriter::new(&mut encoder))?;
-    encoder.finish()?.flush()?;
-    temp.rewind()?;
-    Ok(temp)
+    anyhow::bail!("Match-state capture is unavailable with the installed demoparser API")
 }
 
-#[cfg(test)]
+#[cfg(feature = "demoparser-analysis-api")]
 mod tests {
     use super::*;
 

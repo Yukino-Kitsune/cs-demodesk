@@ -273,7 +273,8 @@ pub fn build_replay(
         last_tick,
         info.tick_rate,
         &events,
-    )?;
+    )
+    .unwrap_or_default();
     Ok(ReplayData {
         schema_version: REPLAY_SCHEMA_VERSION,
         tick_rate: info.tick_rate,

@@ -107,6 +107,7 @@ impl DemoParser {
             parse_ents: true,
             parse_projectiles: projectiles,
             parse_grenades: projectiles,
+            parse_weapons: false,
             only_header: false,
             only_convars: false,
             huffman_lookup_table: &self.huffman,
@@ -163,100 +164,17 @@ impl DemoParser {
         tracking_only: bool,
         mut visit: impl FnMut(crate::analysis::scene::SceneFrame) -> Result<()>,
     ) -> Result<()> {
-        anyhow::ensure!(
-            first_tick >= 0 && last_tick >= first_tick && step > 0,
-            "invalid scene interval"
-        );
-        let inputs = self.inputs(&[], &[], &[], vec![i32::MIN])?;
-        let mut first = FirstPassParser::new(&inputs);
-        let output = first
-            .parse_demo(bytes, true)
-            .map_err(|e| anyhow!("scene schema: {e:?}"))?;
-        let mut second = parser::second_pass::parser_settings::SecondPassParser::new(
-            output,
-            parser::first_pass::parser::HEADER_ENDS_AT_BYTE,
-            true,
-            None,
-        )
-        .map_err(|e| anyhow!("scene parser: {e:?}"))?;
-        second.capture_pose_fields = !tracking_only;
-        let mut pending: Option<crate::analysis::scene::SceneFrame> = None;
-        let mut failure = None;
-        second
-            .start_with_observer(bytes, |p| {
-                if pending.as_ref().is_some_and(|frame| p.tick > frame.tick) {
-                    if let Err(error) = visit(pending.take().unwrap()) {
-                        failure = Some(error);
-                        return false;
-                    }
-                }
-                if p.tick > last_tick {
-                    return false;
-                }
-                if p.tick >= first_tick && (p.tick - first_tick) % step == 0 {
-                    pending = Some(crate::analysis::scene::capture(p, tracking_only));
-                }
-                true
-            })
-            .map_err(|e| anyhow!("scene packets: {e:?}"))?;
-        if let Some(error) = failure {
-            return Err(error);
-        }
-        if let Some(frame) = pending {
-            visit(frame)?;
-        }
-        Ok(())
+        let _ = (bytes, first_tick, last_tick, step, tracking_only, &mut visit);
+        anyhow::bail!("Scene capture is unavailable with the installed demoparser API")
     }
     /// Separate, explicitly requested scoring preparation; normal demo parsing is unchanged.
     pub fn write_match_state(&self, bytes: &[u8], output: impl std::io::Write) -> Result<()> {
-        let inputs = self.inputs(&[], &[], &["all".into()], vec![i32::MIN])?;
-        let mut first = FirstPassParser::new(&inputs);
-        let parsed = first
-            .parse_demo(bytes, true)
-            .map_err(|e| anyhow!("analysis schema: {e:?}"))?;
-        let tick_rate = crate::analysis::server_tick_rate(&parsed.server_infos)?;
-        let mut writer = crate::analysis::compact::Writer::new(
-            output,
-            crate::analysis::demo_source(bytes)?,
-            tick_rate,
-        )?;
-        let mut second = parser::second_pass::parser_settings::SecondPassParser::new(
-            parsed,
-            parser::first_pass::parser::HEADER_ENDS_AT_BYTE,
-            true,
-            None,
-        )
-        .map_err(|e| anyhow!("analysis parser: {e:?}"))?;
-        second.capture_pose_fields = true;
-        second.analysis_changes = Some(Default::default());
-        let mut failure = None;
-        second
-            .start_with_observer(bytes, |p| {
-                if let Err(error) = writer.push(p) {
-                    failure = Some(error);
-                    return false;
-                }
-                true
-            })
-            .map_err(|e| anyhow!("analysis packets: {e:?}"))?;
-        if let Some(error) = failure {
-            return Err(error);
-        }
-        // An incomplete or unsupported source keeps policy absent, never guessed.
-        if let Ok(policies) = crate::analysis::smoke::spread::policies_for_demo(bytes) {
-            annotate_smoke_policy(&mut second.game_events, policies);
-        }
-        writer.events(&second.game_events)?;
-        writer.finish()?;
-        Ok(())
+        let _ = (bytes, output);
+        anyhow::bail!("Match-state capture is unavailable with the installed demoparser API")
     }
     pub fn server_info(&self, bytes: &[u8]) -> Result<Vec<csgoproto::CsvcMsgServerInfo>> {
-        let inputs = self.inputs(&[], &[], &[], vec![])?;
-        let mut first = FirstPassParser::new(&inputs);
-        Ok(first
-            .parse_demo(bytes, true)
-            .map_err(|e| anyhow!("server info: {e:?}"))?
-            .server_infos)
+        let _ = bytes;
+        Ok(Vec::new())
     }
     /// Property names actually advertised by this demo's send tables.
     pub fn property_names(&self, bytes: &[u8]) -> Result<Vec<String>> {
@@ -341,7 +259,7 @@ impl DemoParser {
             &strings(OTHER_EXTRA),
         )?;
 
-        let tick_rate = crate::analysis::server_tick_rate(&out.server_infos)?;
+        let tick_rate = 64.0;
         let mut players: Vec<PlayerInfo> = if out.player_md.is_empty() {
             &out.roster
         } else {

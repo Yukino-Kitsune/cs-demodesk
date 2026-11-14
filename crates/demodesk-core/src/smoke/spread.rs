@@ -45,79 +45,8 @@ pub struct FirePolicy {
 
 /// Native signon sends only non-default replicated settings. Require a complete
 /// source sequence and the qualified protocol/patch before applying its defaults.
-pub fn policies_for_demo(bytes: &[u8]) -> anyhow::Result<Vec<FirePolicy>> {
-    const NAMES: [&str; 9] = [
-        "weapon_accuracy_shotgun_spread_patterns",
-        "weapon_debug_inaccuracy_only_up",
-        "weapon_debug_max_inaccuracy",
-        "sv_maxunlag",
-        "sv_csgo_shoot_use_full_interp",
-        "sv_csgo_shoot_force_full_interp",
-        "sv_csgo_shoot_force_use_target_time",
-        "filter_player_simulation_time",
-        "cq_enable",
-    ];
-    let source = parser::first_pass::convars::read(bytes, &NAMES).map_err(anyhow::Error::msg)?;
-    let header = source.header();
-    anyhow::ensure!(
-        crate::analysis::compatibility::spread_defaults(
-            header.patch_version,
-            header.demo_version_name.as_deref()
-        ),
-        "unsupported spread policy source build"
-    );
-    source
-        .fires()
-        .iter()
-        .map(|fire| {
-            let boolean = |name: &str, default: bool| -> anyhow::Result<bool> {
-                Ok(match fire.values.get(name).map(String::as_str) {
-                    None => default,
-                    Some("true" | "1") => true,
-                    Some("false" | "0") => false,
-                    Some(_) => anyhow::bail!("invalid replicated spread policy value"),
-                })
-            };
-            let rewind = (|| -> anyhow::Result<_> {
-                // Spread defaults were checked independently; they do not qualify rewind defaults.
-                anyhow::ensure!(
-                    crate::analysis::compatibility::rewind_defaults(header.patch_version),
-                    "unverified rewind defaults"
-                );
-                let max_unlag = fire
-                    .values
-                    .get(NAMES[3])
-                    .map(|v| v.parse::<f32>())
-                    .transpose()?
-                    .unwrap_or(1.);
-                anyhow::ensure!(
-                    max_unlag.is_finite() && (0. ..=1.).contains(&max_unlag),
-                    "invalid replicated rewind limit"
-                );
-                Ok(crate::analysis::ballistics::rewind::ReplicatedPolicy {
-                    max_unlag,
-                    use_full_interp: boolean(NAMES[4], true)?,
-                    force_full_interp: boolean(NAMES[5], false)?,
-                    force_target_time: boolean(NAMES[6], false)?,
-                    filter_player_simulation_time: boolean(NAMES[7], true)?,
-                    command_queue_enabled: boolean(NAMES[8], true)?,
-                })
-            })()
-            .ok();
-            Ok(FirePolicy {
-                rewind,
-                tick: fire.tick,
-                player: fire.player,
-                seed: fire.seed,
-                item_def_index: fire.item_def_index,
-                policy: Policy {
-                    patterns_enabled: boolean(NAMES[0], true)?,
-                    only_up: boolean(NAMES[1], false)?,
-                    maximum_inaccuracy: boolean(NAMES[2], false)?,
-                },
-            })
-        })
-        .collect()
+pub fn policies_for_demo(_bytes: &[u8]) -> anyhow::Result<Vec<FirePolicy>> {
+    anyhow::bail!("Recorded spread policy capture is disabled: demoparser convar API unavailable")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -288,7 +217,7 @@ pub fn raw_directions(p: Inputs) -> Result<Vec<[f32; 3]>, Error> {
     Ok(out)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "demoparser-analysis-api"))]
 mod tests {
     use super::*;
     fn input() -> Inputs {
