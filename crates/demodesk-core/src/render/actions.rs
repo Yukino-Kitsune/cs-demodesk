@@ -266,22 +266,26 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
                 .replace(':', "\\:");
             let filter = format!("drawtext=fontfile='{font}':text='{label}':fontcolor=white:fontsize=h/30:box=1:boxcolor=black@0.6:boxborderw=10:x=(w-tw)/2:y=h*0.22:enable='gte(t,{from:.6})'");
             encoding.push_str(&format!(
-                " -vf {{QUOTE}}{}{}{{QUOTE}}",
-                if r.motion_blur_factor > 0 {
-                    format!("tmix=frames={}:weights='{}',fps={},", r.motion_blur_factor + 1, vec!["1"; (r.motion_blur_factor + 1) as usize].join(" "), r.fps)
-                } else { String::new() },
+                " -vf {{QUOTE}}{}{{QUOTE}}",
                 filter.replace('\\', "\\\\")
             ));
-        } else if r.motion_blur_factor > 0 {
-            let frames = r.motion_blur_factor + 1;
-            let weights = vec!["1"; frames as usize].join(" ");
-            encoding.push_str(&format!(" -vf {{QUOTE}}tmix=frames={frames}:weights='{weights}',fps={}{{QUOTE}}", r.fps));
         }
         push(setup_tick, &mut slot, format!("mirv_streams settings add ffmpeg {preset} \"{} {{QUOTE}}{folder}\\\\video.{}{{QUOTE}}\"", encoding, r.container));
+        // Motion blur: HLAE's sampler averages the oversampled game frames down to the output FPS,
+        // so the bundled ffmpeg (built without tmix) only ever sees the final frame rate.
+        let screen_settings = if r.motion_blur_factor > 0 {
+            let sampler = format!("{preset}blur");
+            push(setup_tick, &mut slot, format!("mirv_streams settings add sampler {sampler}"));
+            push(setup_tick, &mut slot, format!("mirv_streams settings edit {sampler} settings {preset}"));
+            push(setup_tick, &mut slot, format!("mirv_streams settings edit {sampler} fps {}", r.fps));
+            sampler
+        } else {
+            preset
+        };
         push(
             setup_tick,
             &mut slot,
-            format!("mirv_streams record screen settings {preset}"),
+            format!("mirv_streams record screen settings {screen_settings}"),
         );
         push(
             setup_tick,
@@ -742,6 +746,23 @@ mod tests {
             "<commandSystem>\n<commands>\n<c tick=\"96.000\">echo [demodesk] seq 1 of 1 seek</c>"
         ));
         assert!(xml.contains("<c tick=\"9808.000\">echo [demodesk] seq 1 of 1 setup</c>"));
+    }
+
+    #[test]
+    fn motion_blur_records_through_a_sampler() {
+        let blur = RenderOptions {
+            motion_blur_factor: 5,
+            ..RenderOptions::default()
+        };
+        let s = build_schedule(&[clip(10_000, 11_000, Some(3))], &opts(&blur));
+        let cmds: Vec<&str> = s.iter().map(|a| a.cmd.as_str()).collect();
+        assert!(cmds.iter().all(|c| !c.contains("tmix")));
+        assert!(cmds.contains(&"mirv_streams settings add sampler demodesk1blur"));
+        assert!(cmds.contains(&"mirv_streams settings edit demodesk1blur settings demodesk1"));
+        assert!(cmds.contains(&format!("mirv_streams settings edit demodesk1blur fps {}", blur.fps).as_str()));
+        assert!(cmds.contains(&"mirv_streams record screen settings demodesk1blur"));
+        assert!(cmds.contains(&format!("mirv_streams record fps {}", blur.fps * 6).as_str()));
+        assert!(idx(&s, "mirv_streams settings add ffmpeg") < idx(&s, "mirv_streams settings edit demodesk1blur settings"));
     }
 
     #[test]
