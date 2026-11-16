@@ -363,6 +363,9 @@
     "hiddenGame": "録画中の CS2 は非表示で動作します。手動で終了しないでください。",
     "submitting": "送信中…",
     "resolutionLimit": "解像度はデバイスとゲームの対応範囲に限られます",
+    "stretch4x3": "4:3 引き伸ばし（ゲームは {{width}}×{{height}} で描画）",
+    "motionBlur": "モーションブラー（追加フレームを合成）",
+    "motionBlurOff": "オフ",
     "tags": {
       "ace": "エース",
       "fast": "連続キル",

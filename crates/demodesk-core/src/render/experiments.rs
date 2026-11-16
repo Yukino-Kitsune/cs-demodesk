@@ -303,8 +303,8 @@ fn record_editing_experiment() -> Result<()> {
             .context("output parent missing")?
             .join("cfg"),
         show_game: options.show_game,
-        width: options.width,
-        height: options.height,
+        width: options.game_size().0,
+        height: options.game_size().1,
         schedule,
         completed_clips: vec![],
         timeout_seconds: 240,

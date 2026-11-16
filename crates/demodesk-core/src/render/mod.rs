@@ -182,7 +182,8 @@ pub struct RenderOptions {
     pub motion_blur_factor: u32,
     pub width: u32,
     pub height: u32,
-    /// One of encode::CODECS.
+    /// Render the game at 4:3 (`height * 4 / 3` × `height`) and stretch it to `width` × `height`.
+    pub stretch_4x3: bool,
     pub codec: String,
     pub crf: u32,
     pub container: String,
@@ -234,6 +235,7 @@ impl Default for RenderOptions {
             motion_blur_factor: 0,
             width: 1920,
             height: 1080,
+            stretch_4x3: false,
             codec: "libsvtav1".into(),
             crf: 20,
             container: "mp4".into(),
@@ -267,6 +269,17 @@ impl Default for RenderOptions {
             combat_quality_priority: true,
             audio_kbps: 192,
             extra_launch_options: vec![],
+        }
+    }
+}
+
+impl RenderOptions {
+    /// Window size CS2 renders at; differs from the output size only for 4:3 stretched.
+    pub fn game_size(&self) -> (u32, u32) {
+        if self.stretch_4x3 {
+            (self.height * 4 / 3, self.height)
+        } else {
+            (self.width, self.height)
         }
     }
 }
@@ -796,8 +809,8 @@ pub fn render_highlights(input: RenderJobInput) -> Result<RenderResult> {
                 .map(|p| p.join("cfg"))
                 .unwrap_or_else(|| output_dir.join("cfg")),
             show_game: o.show_game,
-            width: o.width,
-            height: o.height,
+            width: o.game_size().0,
+            height: o.game_size().1,
             schedule,
             timeout_seconds: (180.0 + indices.len() as f64 * 30.0 + seconds * 6.0) as u64,
             extra_launch_options: o.extra_launch_options.clone(),

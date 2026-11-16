@@ -221,6 +221,8 @@ export interface RenderOptions {
   motionBlurFactor: number;
   width: number;
   height: number;
+  /** render the game at 4:3 and stretch it to width x height */
+  stretch4x3: boolean;
   codec: string;
   crf: number;
   container: string;
@@ -266,6 +268,7 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   motionBlurFactor: 0,
   width: 1920,
   height: 1080,
+  stretch4x3: false,
   codec: 'libsvtav1',
   crf: RENDER_QUALITY.libsvtav1 ?? 20,
   container: 'mp4',

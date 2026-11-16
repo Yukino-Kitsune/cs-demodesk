@@ -10,8 +10,6 @@ const RESOLUTIONS = [
   { label: '1080p', width: 1920, height: 1080 },
   { label: '2K', width: 2560, height: 1440 },
   { label: '4K', width: 3840, height: 2160 },
-  { label: '1440×1080 (4:3) stretched → 1920×1080', width: 1920, height: 1080 },
-  { label: '1920×1440 (4:3) stretched → 2560×1440', width: 2560, height: 1440 },
 ];
 /** HUD switches in the export dialog, in display order. */
 const HUD_TOGGLES = ['hud', 'playerAvatars', 'crosshair', 'radar', 'killFeed', 'chat', 'viewmodel', 'tracers', 'xray', 'trueView'] as const;
@@ -45,7 +43,7 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
           </Dialog.Description>
           {error && <Text as="p" color="red" role="alert">{error}</Text>}
           {children}
-          <Grid columns={{ initial: '1', sm: 'minmax(min-content, 1fr) minmax(0, 1fr)' }} gap="5" mt="4" align="start">
+          <Grid columns={{ initial: '1', sm: 'minmax(0, 1fr) minmax(0, 1fr)' }} gap="5" mt="4" align="start">
             <Flex direction="column" gap="3">
               {count > 1 && !forceMerge && (
                 <Text as="label" size="2">
@@ -89,21 +87,29 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
                 <Text as="div" size="1" color="gray" mb="1">
                   {t('common.resolution')}
                 </Text>
-                <SegmentedControl.Root
+                <Select.Root
                   size="1"
                   value={`${opts.width}x${opts.height}`}
                   onValueChange={(v) => {
                     const r = RESOLUTIONS.find((x) => `${x.width}x${x.height}` === v)!;
                     setOpts({ ...opts, width: r.width, height: r.height });
                   }}
-                  style={{ width: '100%' }}
                 >
-                  {RESOLUTIONS.map((r) => (
-                    <SegmentedControl.Item key={`${r.width}x${r.height}-${r.label}`} value={`${r.width}x${r.height}`} title={`${r.width} × ${r.height}`}>
-                      {r.label}
-                    </SegmentedControl.Item>
-                  ))}
-                </SegmentedControl.Root>
+                  <Select.Trigger style={{ width: '100%' }} />
+                  <Select.Content>
+                    {RESOLUTIONS.map((r) => (
+                      <Select.Item key={r.label} value={`${r.width}x${r.height}`}>
+                        {r.label} · {r.width}×{r.height}
+                      </Select.Item>
+                    ))}
+                  </Select.Content>
+                </Select.Root>
+                <Text as="label" size="2">
+                  <Flex gap="2" align="center" mt="2">
+                    <Switch size="1" checked={opts.stretch4x3} onCheckedChange={(stretch4x3) => setOpts({ ...opts, stretch4x3 })} />
+                    {t('highlights.stretch4x3', { width: Math.round(opts.height * 4 / 3), height: opts.height })}
+                  </Flex>
+                </Text>
                 <Text as="p" size="1" color="gray" mt="1">{t('highlights.resolutionLimit')}</Text>
               </Box>
               <Box>
@@ -115,9 +121,9 @@ export function ExportDialog({open,onOpenChange,count,seconds,status,onSetup,onS
                 </SegmentedControl.Root>
               </Box>
               <Box>
-                <Text as="div" size="1" color="gray" mb="1">Motion blur factor (higher recording FPS, blended into final output)</Text>
+                <Text as="div" size="1" color="gray" mb="1">{t('highlights.motionBlur')}</Text>
                 <SegmentedControl.Root size="1" value={String(opts.motionBlurFactor)} onValueChange={v=>setOpts({...opts,motionBlurFactor:Number(v)})} style={{width:'100%'}}>
-                  {[0,1,2,3,4,5].map(factor=><SegmentedControl.Item key={factor} value={String(factor)}>{factor}x</SegmentedControl.Item>)}
+                  {[0,1,2,3,4,5].map(factor=><SegmentedControl.Item key={factor} value={String(factor)}>{factor ? `${factor}×` : t('highlights.motionBlurOff')}</SegmentedControl.Item>)}
                 </SegmentedControl.Root>
               </Box>
               <Box>

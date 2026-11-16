@@ -363,6 +363,9 @@
     "hiddenGame": "录制时 CS2 会隐藏运行，请不要手动结束它。",
     "submitting": "提交中…",
     "resolutionLimit": "分辨率受限于设备与游戏支持",
+    "stretch4x3": "4:3 拉伸（游戏以 {{width}}×{{height}} 渲染）",
+    "motionBlur": "动态模糊（录制额外帧并混合）",
+    "motionBlurOff": "关闭",
     "tags": {
       "ace": "ACE",
       "fast": "快速连杀",

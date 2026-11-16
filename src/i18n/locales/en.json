@@ -367,6 +367,9 @@
     "hiddenGame": "CS2 runs hidden while recording; do not close it manually.",
     "submitting": "Submitting...",
     "resolutionLimit": "Resolution depends on device and game support",
+    "stretch4x3": "4:3 stretched (game renders at {{width}}×{{height}})",
+    "motionBlur": "Motion blur (records extra frames and blends them)",
+    "motionBlurOff": "Off",
     "tags": {
       "ace": "Ace",
       "fast": "Rapid multi-kill",

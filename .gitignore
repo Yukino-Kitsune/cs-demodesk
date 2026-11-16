@@ -1,6 +1,6 @@
 # Based on https://www.toptal.com/developers/gitignore/api/rust,rust-analyzer,react,windows,linux,macos,visualstudiocode,node
 # Cargo.lock is committed on purpose: this is an application, not a library.
-
+omo-*
 ### Project ###
 demodesk-data/
 dist-portable/

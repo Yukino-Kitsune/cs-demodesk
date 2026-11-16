@@ -234,6 +234,11 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
         push(setup_tick, &mut slot, "mp_display_kill_assists 1".into());
         // HLAE unescapes the doubled backslash before the file name; {QUOTE} is its quote placeholder.
         let mut encoding = o.ffmpeg_preset.clone();
+        // Our -vf replaces HLAE's own `-vf setsar=sar=1/1`, so every chain ends square-pixel.
+        let mut filters = Vec::new();
+        if r.stretch_4x3 {
+            filters.push(format!("scale={}:{},setsar=1", r.width, r.height));
+        }
         if let Some(view) = h.round_result.as_ref().filter(|v| v.from_tick < end_tick) {
             let mut label: String = r
                 .round_result_label
@@ -265,10 +270,10 @@ pub fn build_schedule(clips: &[RenderClip], o: &ActionsOptions) -> Vec<Scheduled
                 .replace('\\', "/")
                 .replace(':', "\\:");
             let filter = format!("drawtext=fontfile='{font}':text='{label}':fontcolor=white:fontsize=h/30:box=1:boxcolor=black@0.6:boxborderw=10:x=(w-tw)/2:y=h*0.22:enable='gte(t,{from:.6})'");
-            encoding.push_str(&format!(
-                " -vf {{QUOTE}}{}{{QUOTE}}",
-                filter.replace('\\', "\\\\")
-            ));
+            filters.push(filter.replace('\\', "\\\\"));
+        }
+        if !filters.is_empty() {
+            encoding.push_str(&format!(" -vf {{QUOTE}}{}{{QUOTE}}", filters.join(",")));
         }
         push(setup_tick, &mut slot, format!("mirv_streams settings add ffmpeg {preset} \"{} {{QUOTE}}{folder}\\\\video.{}{{QUOTE}}\"", encoding, r.container));
         // Motion blur: HLAE's sampler averages the oversampled game frames down to the output FPS,
@@ -763,6 +768,18 @@ mod tests {
         assert!(cmds.contains(&"mirv_streams record screen settings demodesk1blur"));
         assert!(cmds.contains(&format!("mirv_streams record fps {}", blur.fps * 6).as_str()));
         assert!(idx(&s, "mirv_streams settings add ffmpeg") < idx(&s, "mirv_streams settings edit demodesk1blur settings"));
+    }
+
+    #[test]
+    fn stretch_scales_the_4x3_game_to_the_output_size() {
+        let stretched = RenderOptions {
+            stretch_4x3: true,
+            ..RenderOptions::default()
+        };
+        assert_eq!(stretched.game_size(), (1440, 1080));
+        let s = build_schedule(&[clip(10_000, 11_000, Some(3))], &opts(&stretched));
+        assert!(s.iter().any(|a| a.cmd.starts_with("mirv_streams settings add ffmpeg")
+            && a.cmd.contains("-vf {QUOTE}scale=1920:1080,setsar=1{QUOTE}")));
     }
 
     #[test]

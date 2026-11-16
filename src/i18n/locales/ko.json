@@ -363,6 +363,9 @@
     "hiddenGame": "녹화 중 CS2는 숨겨진 상태로 실행됩니다. 직접 종료하지 마세요.",
     "submitting": "요청 중...",
     "resolutionLimit": "해상도는 기기와 게임의 지원 범위로 제한됩니다",
+    "stretch4x3": "4:3 늘리기 (게임은 {{width}}×{{height}}로 렌더링)",
+    "motionBlur": "모션 블러 (추가 프레임을 합성)",
+    "motionBlurOff": "끄기",
     "tags": {
       "ace": "에이스",
       "fast": "연속 킬",
